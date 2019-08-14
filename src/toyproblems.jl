@@ -7,6 +7,7 @@ using Distributions
 include("solverparams.jl")
 
 # type definitions
+include("modelparams.jl")
 include("buildall.jl")
 
 # data assimilation

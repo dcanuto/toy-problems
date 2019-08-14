@@ -3,12 +3,12 @@ using toyproblems
 function main()
     # option flags
     rstflag = "no"
+    observeflag = "sparse" # complete, incomplete, or sparse
 
     # initialization
-    tf = 30; # total number of cardiac cycles
+    tf = 1.; # total number of cardiac cycles
     ensemblesize = 50;
     if rstflag == "no"
-        y0 = [[rand(Distributions.Normal(1,0.1));0;0;0] for i=1:ensemblesize]; # random
         nvar = [4 for i=1:ensemblesize];
         systems = pmap((a1)->toyproblems.CVSystem(a1),nvar);
     elseif rstflag == "yes"
@@ -17,23 +17,23 @@ function main()
         nvar = [4 for i=1:ensemblesize];
         rst = [rstflag for i=1:ensemblesize];
         systems = pmap((a1,a2,a3)->toyproblems.CVSystem(a1,a2,a3),nvar,vars,rst);
-        y0 = [[vars[1]["system"]["Pb"][end];vars[1]["system"]["Q1"][end];
-            vars[1]["system"]["Q2"][end];vars[1]["system"]["Q3"][end]] for i=1:ensemblesize];
     end
-    t0 = [0 for i=1:ensemblesize];
     sparams = [systems[i].sparams for i=1:ensemblesize];
     mparams = [systems[i].mparams for i=1:ensemblesize];
-    to = Vector{Float64}[];
-    yo = Vector{Vector{Float64}}[];
-    append!(yo,[[zeros(1)]]);
-    append!(to,[zeros(1)]);
+    to = [zeros(1) for i=1:ensemblesize];
 
     # data assimilation setup
     # allocators for ensemble augmented state, measurements
     nparams = 3;
     X = [zeros(nvar[1]) for i in (1:length(systems))];
     θ = [zeros(nparams) for i in (1:length(systems))];
-    Y = [zeros(4) for i in (1:length(systems))];
+    if observeflag == "complete"
+        Y = [zeros(3) for i in (1:length(systems))];
+    elseif observeflag == "incomplete"
+        Y = [zeros(2) for i in (1:length(systems))];
+    elseif observeflag == "sparse"
+        Y = [zeros(1) for i in (1:length(systems))];
+    end
 
     # parameter scalings
     θs = zeros(nparams);
@@ -47,10 +47,22 @@ function main()
     # allocators for state, forecast measurement mean
     xhat = zeros(nvar[1]);
     θhat = zeros(nparams);
-    yhat = zeros(4);
+    if observeflag == "complete"
+        yhat = zeros(3);
+    elseif observeflag == "incomplete"
+        yhat = zeros(2);
+    elseif observeflag == "sparse"
+        yhat = zeros(1);
+    end
 
     # allocators for measurement replicates
-    yi = [zeros(4) for i in 1:length(systems)];
+    if observeflag == "complete"
+        yi = [zeros(3) for i in 1:length(systems)];
+    elseif observeflag == "incomplete"
+        yi = [zeros(2) for i in 1:length(systems)];
+    elseif observeflag == "sparse"
+        yi = [zeros(1) for i in 1:length(systems)];
+    end
 
     # output variables for ensemble avg. state, meas., params. w/ times
     tout = Float64[];
@@ -65,7 +77,7 @@ function main()
     Pθout = Vector{Float64}[];
     Pθoutv = Vector{Float64}[];
     Pxout = Vector{Float64}[];
-    Pxoutv = Vector{Float64}[];j
+    Pxoutv = Vector{Float64}[];
     lbx = Vector{Float64}[];
     ubx = Vector{Float64}[];
     lbxv = Vector{Float64}[];
@@ -98,14 +110,23 @@ function main()
         Q1true = (P1true - Pbtrue)/R1true;
         Q2true = Pbtrue/R2true;
         Q3true = Pbtrue/R3true;
-        y = [P1true,Pbtrue,Q2true,Q3true];
+        if observeflag == "complete"
+            y = [Pbtrue,Q2true,Q3true];
+        elseif observeflag == "incomplete"
+            y = [Pbtrue,Q2true];
+        elseif observeflag == "sparse"
+            y = [Pbtrue];
+        end
 
         # generate measurement replicates
         for i = 1:length(systems)
             yi[i][1] = y[1] + rand(Distributions.Normal(0,error.odev[1]));
-            yi[i][2] = y[2] + rand(Distributions.Normal(0,error.odev[2]));
-            yi[i][3] = y[3] + rand(Distributions.Normal(0,error.odev[3]));
-            yi[i][4] = y[4] + rand(Distributions.Normal(0,error.odev[4]));
+            if observeflag == "complete" || observeflag == "incomplete"
+                yi[i][2] = y[2] + rand(Distributions.Normal(0,error.odev[2]));
+            end
+            if observeflag == "complete"
+                yi[i][3] = y[3] + rand(Distributions.Normal(0,error.odev[3]));
+            end
         end
 
         # forecast parameters and means
@@ -117,7 +138,7 @@ function main()
 
         # forecast parameters (dimensional)
         # println("Forecast parameters:")
-        θ = [WK3.paramwalk!(error,θs,θ[i]) for i in 1:length(systems)];
+        θ = [toyproblems.paramwalk!(error,θs,θ[i]) for i in 1:length(systems)];
 
         # non-dimensionalize parameters
         for i = 1:length(systems)
@@ -145,7 +166,7 @@ function main()
             Q1true = (P1true - Pbtrue)/R1true;
             Q2true = Pbtrue/R2true;
             Q3true = Pbtrue/R3true;
-            append!(systems[i].Pb,P1/(mparams[i].R1*(1/mparams[i].R1+1/mparams[i].R2+1/mparams[i].R3)
+            append!(systems[i].Pb,P1/(mparams[i].R1*(1/mparams[i].R1+1/mparams[i].R2+1/mparams[i].R3)))
             append!(systems[i].Q1,(P1-systems[i].Pb[end])/mparams[i].R1)
             append!(systems[i].Q2,systems[i].Pb[end]/mparams[i].R2)
             append!(systems[i].Q3,systems[i].Pb[end]/mparams[i].R3)
@@ -155,7 +176,13 @@ function main()
         X = [[systems[i].Pb[end],systems[i].Q1[end],systems[i].Q2[end],systems[i].Q3[end]] for i in 1:ensemblesize];
 
         # vector of forecast measurements
-        Y = [[systems[i].Pb[end],systems[i].Q1[end],systems[i].Q2[end],systems[i].Q3[end]] for i in 1:ensemblesize];
+        if observeflag == "complete"
+            Y = [[systems[i].Pb[end],systems[i].Q2[end],systems[i].Q3[end]] for i in 1:ensemblesize];
+        elseif observeflag == "incomplete"
+            Y = [[systems[i].Pb[end],systems[i].Q2[end]] for i in 1:ensemblesize];
+        elseif observeflag == "sparse"
+            Y = [[systems[i].Pb[end]] for i in 1:ensemblesize];
+        end
 
         # forecast mean state, parameters, measurement
         xhat = mean(X);
@@ -176,7 +203,13 @@ function main()
         Pyy ./= (ensemblesize);
 
         # add meas. noise to meas. covariance (allows invertibility)
-        Pyy += diagm([(error.odev[1])^2,(error.odev[2])^2,(error.odev[3])^2,(error.odev[4])^2],0);
+        if observeflag == "complete"
+            Pyy += diagm([(error.odev[1])^2,(error.odev[2])^2,(error.odev[3])^2],0);
+        elseif observeflag == "incomplete"
+            Pyy += diagm([(error.odev[1])^2,(error.odev[2])^2],0);
+        elseif observeflag == "sparse"
+            Pyy += diagm([(error.odev[1])^2],0);
+        end
 
         # parameter Kalman gain
         K = Pty*inv(Pyy);
@@ -251,7 +284,7 @@ function main()
             Q1true = (P1true - Pbtrue)/R1true;
             Q2true = Pbtrue/R2true;
             Q3true = Pbtrue/R3true;
-            append!(systems[i].Pb,P1/(mparams[i].R1*(1/mparams[i].R1+1/mparams[i].R2+1/mparams[i].R3)
+            append!(systems[i].Pb,P1/(mparams[i].R1*(1/mparams[i].R1+1/mparams[i].R2+1/mparams[i].R3)))
             append!(systems[i].Q1,(P1-systems[i].Pb[end])/mparams[i].R1)
             append!(systems[i].Q2,systems[i].Pb[end]/mparams[i].R2)
             append!(systems[i].Q3,systems[i].Pb[end]/mparams[i].R3)
@@ -261,7 +294,13 @@ function main()
         X = [[systems[i].Pb[end],systems[i].Q1[end],systems[i].Q2[end],systems[i].Q3[end]] for i in 1:ensemblesize];
 
         # vector of analysis measurements
-        Y = [[systems[i].Pb[end],systems[i].Q1[end],systems[i].Q2[end],systems[i].Q3[end]] for i in 1:ensemblesize];
+        if observeflag == "complete"
+            Y = [[systems[i].Pb[end],systems[i].Q2[end],systems[i].Q3[end]] for i in 1:ensemblesize];
+        elseif observeflag == "incomplete"
+            Y = [[systems[i].Pb[end],systems[i].Q2[end]] for i in 1:ensemblesize];
+        elseif observeflag == "sparse"
+            Y = [[systems[i].Pb[end]] for i in 1:ensemblesize];
+        end
 
         # for i in 1:ensemblesize
         #     println("Forecast values, member $i: $(X[i][1:end])")
@@ -312,7 +351,7 @@ function main()
         if to[1][end] < tf
             tfnew = to[1][end] + systems[1].sparams.dtsav;
             for i = 1:ensemblesize
-                append!(to[i][end],tfnew)
+                append!(to[i],tfnew)
             end
         end
     end
@@ -359,9 +398,9 @@ function main()
     end
 
     # save for post-processing
-    vnames = ["t" "x" "Px" "theta" "Pt" "Pv" "lb" "ub"];
+    vnames = ["t" "x" "Px" "theta" "Pt" "lb" "ub"];
     for i in 1:length(vnames)
-        file = MAT.matopen("$(vnames[i]).mat","w");
+        file = MAT.matopen("$(vnames[i])_$(observeflag)_y.mat","w");
         if vnames[i] == "t"
             write(file,"t",tout)
         elseif vnames[i] == "x"
@@ -372,8 +411,6 @@ function main()
             write(file,"theta",θoutv)
         elseif vnames[i] == "Pt"
             write(file,"Pt",Pθoutv)
-        elseif vnames[i] == "Pv"
-            write(file,"Pv",Pvout)
         elseif vnames[i] == "lb"
             write(file,"lb",lbxv)
         elseif vnames[i] == "ub"
