@@ -1,9 +1,8 @@
 type CVSystem
-    Pa::Vector{Float64}
-    Pv::Vector{Float64}
-    V::Vector{Float64}
-    E::Vector{Float64}
-    Q::Vector{Float64}
+    Pb::Vector{Float64}
+    Q1::Vector{Float64}
+    Q2::Vector{Float64}
+    Q3::Vector{Float64}
     t::Vector{Float64}
     sparams::SolverParams
     mparams::ModelParams
@@ -16,11 +15,10 @@ type CVSystem
             mparams = old["system"]["mparams"];
             this.mparams = ModelParams(mparams,restart);
         end
-        this.Pa = [];
-        this.V = [];
-        this.Q = [];
-        this.Pv = [];
-        this.E = [];
+        this.Pb = [];
+        this.Q1 = [];
+        this.Q2 = [];
+        this.Q3 = [];
         this.t = [];
         this.sparams = SolverParams(nvar);
         return this
